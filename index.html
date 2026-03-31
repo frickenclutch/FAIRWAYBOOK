@@ -727,45 +727,7 @@
             }
         }
 
-        function playApplause() {
-            if (!audioCtx) return;
-            
-            const bufferSize = audioCtx.sampleRate * 3; // 3 seconds of audio
-            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-            const data = buffer.getChannelData(0);
-            
-            // Generate white noise with randomized volume spikes to simulate individual claps
-            for (let i = 0; i < bufferSize; i++) {
-                let noise = Math.random() * 2 - 1;
-                if (Math.random() < 0.005) { // 0.5% chance of a loud clap peak
-                    noise *= 4;
-                }
-                data[i] = noise;
-            }
-            
-            const noiseSource = audioCtx.createBufferSource();
-            noiseSource.buffer = buffer;
-            
-            // Bandpass filter muffles the noise to human clapping frequencies (~1000Hz)
-            const filter = audioCtx.createBiquadFilter();
-            filter.type = 'bandpass';
-            filter.frequency.value = 1000; 
-            filter.Q.value = 0.5;
-            
-            // Gain node controls the volume envelope (fade in, hold, fade out)
-            const gainNode = audioCtx.createGain();
-            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-            gainNode.gain.linearRampToValueAtTime(1.5, audioCtx.currentTime + 0.1); // Quick fade in
-            gainNode.gain.setValueAtTime(1.5, audioCtx.currentTime + 1.2); // Hold volume
-            gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 2.5); // Fade out to 0 right before redirect
-            
-            // Connect nodes and play
-            noiseSource.connect(filter);
-            filter.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            
-            noiseSource.start();
-        }
+     
 
         // --- Input Handling ---
 
@@ -908,9 +870,6 @@
             if (typeof navigator !== 'undefined' && navigator.vibrate) {
                 navigator.vibrate([150, 50, 300]); 
             }
-            
-            // Play Synthesized Audience Applause (Fades out automatically)
-            playApplause();
             
             // Plop sound simulation (just visual)
             velocity.set(0, 0, 0);

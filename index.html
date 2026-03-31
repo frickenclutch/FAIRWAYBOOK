@@ -141,7 +141,7 @@
 
         // --- Environment Creation ---
         
-        // Helper function for deterministic terrain height (prevents clipping & allows hills)
+        // Helper function for deterministic terrain height (BotW Rolling Hills)
         function getTerrainHeight(x, z) {
             if (Math.abs(x) <= 3) return 0; // Flat fairway down the middle
             let edgeDist = Math.abs(x) - 3;
@@ -177,16 +177,29 @@
         grass.receiveShadow = true;
         scene.add(grass);
 
-        // Distant Mountains for BotW Skyline
+        // Distant Mountains for BotW Skyline (Rounded Hills)
         function createMountain(x, z, scale) {
-            const mountGeo = new THREE.ConeGeometry(15 * scale, 25 * scale, 7);
+            const group = new THREE.Group();
             const mountMat = new THREE.MeshStandardMaterial({ color: 0x5a9e38, flatShading: true, roughness: 1.0 });
-            const mountain = new THREE.Mesh(mountGeo, mountMat);
-            mountain.position.set(x, (12.5 * scale) - 5, z); // Bury base slightly
-            mountain.rotation.y = Math.random() * Math.PI;
-            scene.add(mountain);
+            
+            // Use squashed spheres to create organic, rounded rolling hills
+            const mainHill = new THREE.Mesh(new THREE.SphereGeometry(18 * scale, 24, 16), mountMat);
+            mainHill.scale.set(1, 0.45, 1); // Flatten vertically into a hill shape
+            mainHill.position.set(0, 0, 0);
+            
+            const sideHill = new THREE.Mesh(new THREE.SphereGeometry(12 * scale, 24, 16), mountMat);
+            sideHill.scale.set(1, 0.4, 1);
+            sideHill.position.set(10 * scale, -2 * scale, 5 * scale);
+            
+            group.add(mainHill, sideHill);
+            
+            // Bury the bottom halves so they rise naturally from the horizon
+            group.position.set(x, -3 * scale, z); 
+            group.rotation.y = Math.random() * Math.PI;
+            scene.add(group);
         }
-        // Place mountains way in the back
+        
+        // Place rolling hills way in the back
         createMountain(-60, -110, 2.5);
         createMountain(70, -130, 3.2);
         createMountain(-25, -150, 4.0);
@@ -222,10 +235,11 @@
         function createTree(x, z) {
             const terrainY = getTerrainHeight(x, z);
 
-            const trunkGeo = new THREE.CylinderGeometry(0.15, 0.25, 1.2, 5);
+            // Lengthen the trunk and bury it deeper to prevent floating on uneven low-poly interpolation
+            const trunkGeo = new THREE.CylinderGeometry(0.15, 0.25, 2.5, 5);
             const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6e5233, flatShading: true });
             const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-            trunk.position.set(x, terrainY + 0.6, z);
+            trunk.position.set(x, terrainY + 0.1, z); // Center is low, burying the bottom 1.15 units deep
             trunk.castShadow = true;
 
             // Fluffy, chunky leaves using overlapping dodecahedrons
@@ -268,6 +282,24 @@
         const bbCtx = blimpBodyCanvas.getContext('2d');
         bbCtx.fillStyle = '#e5e7eb'; // Silver-white base
         bbCtx.fillRect(0, 0, 2048, 1024);
+        
+        // Draw text on the true lateral sides of the blimp
+        bbCtx.fillStyle = '#1e3a8a'; // Dark Blue font so it pops
+        bbCtx.font = 'bold 240px "Georgia", serif';
+        bbCtx.textAlign = 'center';
+        bbCtx.textBaseline = 'middle';
+        
+        bbCtx.save();
+        // Squeeze the text horizontally so it looks normal when stretched 2.5x on the 3D sphere
+        bbCtx.scale(0.4, 1);
+        
+        // ThreeJS SphereGeometry maps U=0.25 (Canvas X=512) to the +Z face (left/port side)
+        bbCtx.fillText("HOWLAND", 512 / 0.4, 512); 
+
+        // ThreeJS SphereGeometry maps U=0.75 (Canvas X=1536) to the -Z face (right/starboard side)
+        bbCtx.fillText("PUMP", 1536 / 0.4, 512); 
+        bbCtx.restore();
+
         const blimpBodyTex = new THREE.CanvasTexture(blimpBodyCanvas);
         blimpBodyTex.anisotropy = 16;
         
@@ -278,45 +310,16 @@
         const bCtx = bannerCanvas.getContext('2d');
         bCtx.fillStyle = '#ffffff';
         bCtx.fillRect(0, 0, bannerCanvas.width, bannerCanvas.height);
-        bCtx.fillStyle = '#8b0000'; // Dark red matching Hulbert Supply
-        bCtx.font = 'bold 44px "Georgia", serif';
-        bCtx.textAlign = 'left';
+        bCtx.fillStyle = '#c26b00'; // Dark Bitcoin Orange
+        bCtx.font = 'bold 80px "Georgia", serif';
+        bCtx.textAlign = 'center';
         bCtx.textBaseline = 'middle';
-        bCtx.fillText("Sponsored by Howland Pump & Supply", 250, bannerCanvas.height/2);
+        bCtx.fillText("C4: TECHNOLOGIES", bannerCanvas.width/2, bannerCanvas.height/2);
+        
         const bannerTex = new THREE.CanvasTexture(bannerCanvas);
         bannerTex.anisotropy = 16;
 
-        // 3. Load uploaded logo and paint onto blimp & banner
-        const logoImg = new Image();
-        logoImg.src = 'image_4988ca.png';
-        logoImg.onload = () => {
-            const logoW = 450;
-            const logoH = 280;
-
-            // Create a mirrored version of the logo for the back side of the blimp
-            const mirroredCanvas = document.createElement('canvas');
-            mirroredCanvas.width = logoW;
-            mirroredCanvas.height = logoH;
-            const mCtx = mirroredCanvas.getContext('2d');
-            mCtx.translate(logoW, 0);
-            mCtx.scale(-1, 1);
-            mCtx.drawImage(logoImg, 0, 0, logoW, logoH);
-
-            // Right Side of blimp (+Z seam). Reads correctly from outside.
-            bbCtx.drawImage(logoImg, 0 - logoW/2, 512 - logoH/2, logoW, logoH);
-            bbCtx.drawImage(logoImg, 2048 - logoW/2, 512 - logoH/2, logoW, logoH);
-            
-            // Left Side of blimp (-Z face). Needs mirroring to read correctly from outside.
-            bbCtx.drawImage(mirroredCanvas, 1024 - logoW/2, 512 - logoH/2, logoW, logoH);
-            
-            blimpBodyTex.needsUpdate = true;
-            
-            // Paint on Banner
-            bCtx.drawImage(logoImg, 40, 15, 180, 130);
-            bannerTex.needsUpdate = true;
-        };
-
-        // 4. Blimp Mesh Assembly
+        // 3. Blimp Mesh Assembly
         const blimpGeo = new THREE.SphereGeometry(1.5, 64, 32); // High polygon count
         const blimpMat = new THREE.MeshStandardMaterial({ 
             map: blimpBodyTex, 
@@ -815,7 +818,7 @@
 
             // Redirect to main site after sequence
             setTimeout(() => {
-                window.location.href = "https://app.fairwaybook.com";
+                window.location.href = "https://www.fairwaybook.com";
             }, 2500);
         }
 

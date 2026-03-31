@@ -139,6 +139,50 @@
         dirLight.shadow.camera.bottom = -50;
         scene.add(dirLight);
 
+        // --- The Sun ---
+        // Placed in the exact same direction as the directional light, pushed far out into the skybox
+        const sunGeo = new THREE.SphereGeometry(12, 32, 32);
+        const sunMat = new THREE.MeshBasicMaterial({ color: 0xfff9eb }); // Pure unlit color so it glows brightly
+        const sun = new THREE.Mesh(sunGeo, sunMat);
+        sun.position.set(-75, 100, -50); 
+        scene.add(sun);
+
+        // --- Ambient Clouds ---
+        const clouds = [];
+        function createCloud(x, y, z, scale) {
+            const group = new THREE.Group();
+            const cloudMat = new THREE.MeshStandardMaterial({ 
+                color: 0xffffff, 
+                flatShading: true, 
+                roughness: 1.0,
+                emissive: 0x222222 // Gives them a slight self-illumination so they don't look overly grey underneath
+            });
+            
+            // Build fluffy cloud from overlapping spheres
+            const c1 = new THREE.Mesh(new THREE.SphereGeometry(3 * scale, 16, 16), cloudMat);
+            const c2 = new THREE.Mesh(new THREE.SphereGeometry(2 * scale, 16, 16), cloudMat);
+            c2.position.set(3 * scale, -0.5 * scale, 1 * scale);
+            const c3 = new THREE.Mesh(new THREE.SphereGeometry(2.5 * scale, 16, 16), cloudMat);
+            c3.position.set(-3 * scale, -0.5 * scale, -1 * scale);
+            const c4 = new THREE.Mesh(new THREE.SphereGeometry(1.8 * scale, 16, 16), cloudMat);
+            c4.position.set(1.5 * scale, 1.5 * scale, -0.5 * scale);
+            
+            group.add(c1, c2, c3, c4);
+            group.position.set(x, y, z);
+            group.scale.set(1, 0.6, 1); // Flatten bottom slightly for a natural cloud look
+            
+            scene.add(group);
+            clouds.push(group);
+        }
+
+        // Scatter some clouds high in the sky
+        createCloud(-40, 45, -80, 2.0);
+        createCloud(50, 55, -100, 3.0);
+        createCloud(10, 40, -60, 1.5);
+        createCloud(-80, 50, -40, 2.5);
+        createCloud(70, 35, -30, 2.0);
+        createCloud(-20, 60, -120, 4.0);
+
         // --- Environment Creation ---
         
         // Helper function for deterministic terrain height (BotW Rolling Hills)
@@ -667,16 +711,70 @@
         let baseGamma = null;
         let baseBeta = null;
         let useMouseFallback = true;
+        let isDragging = false; // Prevents touch and gyro from fighting each other
         let mouseX = 0;
         let mouseY = 0;
+
+        // --- Audio System (Web Audio API) ---
+        let audioCtx;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playApplause() {
+            if (!audioCtx) return;
+            
+            const bufferSize = audioCtx.sampleRate * 3; // 3 seconds of audio
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            
+            // Generate white noise with randomized volume spikes to simulate individual claps
+            for (let i = 0; i < bufferSize; i++) {
+                let noise = Math.random() * 2 - 1;
+                if (Math.random() < 0.005) { // 0.5% chance of a loud clap peak
+                    noise *= 4;
+                }
+                data[i] = noise;
+            }
+            
+            const noiseSource = audioCtx.createBufferSource();
+            noiseSource.buffer = buffer;
+            
+            // Bandpass filter muffles the noise to human clapping frequencies (~1000Hz)
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'bandpass';
+            filter.frequency.value = 1000; 
+            filter.Q.value = 0.5;
+            
+            // Gain node controls the volume envelope (fade in, hold, fade out)
+            const gainNode = audioCtx.createGain();
+            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(1.5, audioCtx.currentTime + 0.1); // Quick fade in
+            gainNode.gain.setValueAtTime(1.5, audioCtx.currentTime + 1.2); // Hold volume
+            gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 2.5); // Fade out to 0 right before redirect
+            
+            // Connect nodes and play
+            noiseSource.connect(filter);
+            filter.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            noiseSource.start();
+        }
 
         // --- Input Handling ---
 
         function handleOrientation(event) {
+            // Ignore gyro if the user is currently touching/dragging the screen
+            if (isDragging || !isPlaying || isWon) return; 
+
             // Check for valid data and ensure it's not dead zeroes
             if (event.gamma !== null && event.beta !== null) {
-                if (event.gamma === 0 && event.beta === 0) return; // Ignore uninitialized zeros
-
                 useMouseFallback = false;
                 
                 // Set baseline on first read
@@ -689,7 +787,7 @@
                 let deltaGamma = event.gamma - baseGamma;
                 let deltaBeta = event.beta - baseBeta;
 
-                // Handle gimbal wrap-around
+                // Handle gimbal wrap-around gracefully
                 if (deltaGamma > 90) deltaGamma -= 180;
                 if (deltaGamma < -90) deltaGamma += 180;
 
@@ -705,7 +803,7 @@
         }
 
         function handleMouseMove(event) {
-            if (!useMouseFallback) return;
+            if (!useMouseFallback || isDragging) return;
             // Normalize mouse position to -1 to +1
             const nx = (event.clientX / window.innerWidth) * 2 - 1;
             const ny = (event.clientY / window.innerHeight) * 2 - 1;
@@ -721,6 +819,7 @@
         document.addEventListener('touchstart', (e) => {
             if (!isPlaying || isWon) return;
             useMouseFallback = false;
+            isDragging = true; // Flag touch as active to override gyro temporarily
             touchStartX = e.touches[0].clientX;
             touchStartY = e.touches[0].clientY;
         }, { passive: false });
@@ -742,6 +841,8 @@
 
         document.addEventListener('touchend', () => {
             if (!isPlaying || isWon) return;
+            isDragging = false; // Allow gyro to take back over
+            
             // Snap back to forward trajectory when finger is lifted
             targetVelocityX = 0;
             targetVelocityZ = -0.05;
@@ -750,6 +851,9 @@
         // --- UI Interactions ---
 
         document.getElementById('start-btn').addEventListener('click', () => {
+            // Initialize audio context on first user interaction to satisfy browser policies
+            initAudio(); 
+
             const startSequence = () => {
                 document.getElementById('ui-layer').style.backgroundColor = 'transparent';
                 document.getElementById('ui-layer').style.backdropFilter = 'none';
@@ -800,6 +904,14 @@
             if (isWon) return;
             isWon = true;
             
+            // Trigger strong haptic feedback for mobile devices (Plop! .. Ta-da!)
+            if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                navigator.vibrate([150, 50, 300]); 
+            }
+            
+            // Play Synthesized Audience Applause (Fades out automatically)
+            playApplause();
+            
             // Plop sound simulation (just visual)
             velocity.set(0, 0, 0);
             
@@ -818,7 +930,7 @@
 
             // Redirect to main site after sequence
             setTimeout(() => {
-                window.location.href = "https://app.fairwaybook.com";
+                window.location.href = "https://www.fairwaybook.com";
             }, 2500);
         }
 
@@ -829,6 +941,14 @@
             requestAnimationFrame(animate);
 
             const time = clock.getElapsedTime();
+
+            // --- Cloud Animation ---
+            clouds.forEach(cloud => {
+                cloud.position.x += 0.01; // Gentle wind drift
+                if (cloud.position.x > 150) {
+                    cloud.position.x = -150; // Wrap around
+                }
+            });
 
             // --- High-Fidelity Blimp Animation (Slowed Down) ---
             // Keep the blimp strictly in center focus relative to the camera, slowed movement for readability

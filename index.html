@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>FairwayBook - Enter the Course</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #87CEEB; /* Fallback sky color */
+            touch-action: none; /* Prevent browser scrolling/pull-to-refresh */
+            font-family: 'Georgia', serif;
+        }
+        #canvas-container { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            z-index: 1; 
+        }
+        #ui-layer { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            z-index: 10; 
+            pointer-events: none; 
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 1s ease-in-out, background-color 1s ease;
+        }
+        .pointer-events-auto { pointer-events: auto; }
+        
+        /* Custom animations */
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+            100% { transform: translateY(0px); }
+        }
+        .animate-float { animation: float 4s ease-in-out infinite; }
+        
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 15px rgba(34, 197, 94, 0.4); }
+            50% { box-shadow: 0 0 30px rgba(34, 197, 94, 0.8); }
+        }
+        .btn-glow { animation: pulse-glow 2s infinite; }
+
+        /* Crosshair/Target hint */
+        #aim-hint {
+            position: absolute;
+            top: 20%;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255,255,255,0.6);
+            font-size: 1.2rem;
+            letter-spacing: 2px;
+            pointer-events: none;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            opacity: 0;
+            transition: opacity 0.5s;
+            z-index: 5;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 3D Canvas Container -->
+    <div id="canvas-container"></div>
+    
+    <!-- Gameplay Hint -->
+    <div id="aim-hint" class="font-sans uppercase font-bold text-sm tracking-widest text-white/70">
+        Tilt or Drag to Steer
+    </div>
+
+    <!-- UI Overlay -->
+    <div id="ui-layer" class="bg-black/40 backdrop-blur-sm">
+        
+        <!-- Intro Screen -->
+        <div id="intro-screen" class="pointer-events-auto text-center p-10 bg-white/10 rounded-3xl border border-white/20 shadow-2xl backdrop-blur-md max-w-lg mx-4">
+            <div class="mb-2 text-green-400 font-sans font-bold tracking-widest uppercase text-sm animate-float">Welcome to</div>
+            <h1 class="text-5xl md:text-6xl text-white mb-6 drop-shadow-xl font-bold">FairwayBook</h1>
+            <p class="text-white/90 mb-8 text-lg md:text-xl font-sans font-light leading-relaxed">
+                Tilt your phone <strong>or drag your finger</strong> to steer the ball into the hole.
+                <span class="block text-sm opacity-70 mt-2">(Desktop users: Use your mouse)</span>
+            </p>
+            <button id="start-btn" class="bg-green-600 hover:bg-green-500 text-white font-sans font-bold py-4 px-12 rounded-full text-xl transition-all transform hover:scale-105 btn-glow">
+                Tee Off
+            </button>
+        </div>
+
+        <!-- Success Screen (Hidden Initially) -->
+        <div id="success-screen" class="hidden text-center scale-90 opacity-0 transition-all duration-700 transform">
+            <h2 class="text-6xl md:text-8xl text-white mb-4 drop-shadow-[0_4px_20px_rgba(0,0,0,0.5)] font-bold">Perfect!</h2>
+            <p class="text-white text-2xl font-sans animate-pulse">Entering FairwayBook...</p>
+        </div>
+        
+    </div>
+
+    <script>
+        // --- 3D Scene Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        
+        // Beautiful sunset/sunrise sky color (BotW style)
+        scene.background = new THREE.Color('#9cd3f0');
+        scene.fog = new THREE.FogExp2('#9cd3f0', 0.015);
+
+        // Camera setup (simulating the eye right behind the ball)
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        container.appendChild(renderer.domElement);
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.75); // Brighter, softer base light
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xfff4e5, 1.1); // Warm, bright sunlight
+        dirLight.position.set(-15, 20, -10);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 50;
+        dirLight.shadow.camera.left = -20;
+        dirLight.shadow.camera.right = 20;
+        dirLight.shadow.camera.top = 20;
+        dirLight.shadow.camera.bottom = -20;
+        scene.add(dirLight);
+
+        // --- Environment Creation ---
+        
+        // Helper function for deterministic terrain height (prevents clipping & allows hills)
+        function getTerrainHeight(x, z) {
+            if (Math.abs(x) <= 3) return 0; // Flat fairway down the middle
+            const edgeDist = Math.abs(x) - 3;
+            // Rolling hills using sine/cosine for an organic, stylized look
+            const noise = Math.sin(x * 1.2) * 0.2 + Math.cos(z * 0.6) * 0.2;
+            return edgeDist * 0.4 + (noise * edgeDist);
+        }
+        
+        // 1. The Fairway (Main Grass)
+        const grassGeometry = new THREE.PlaneGeometry(100, 100, 64, 64);
+        const grassMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x6dbf43, // Vibrant, stylized BotW green
+            roughness: 1.0,
+            metalness: 0.0,
+            flatShading: true // Gives a painterly, low-poly vibe to the terrain
+        });
+        
+        // Displace vertices deterministically
+        const posAttribute = grassGeometry.attributes.position;
+        for (let i = 0; i < posAttribute.count; i++) {
+            const x = posAttribute.getX(i);
+            const y = posAttribute.getY(i); // This acts as Z before rotation
+            const height = getTerrainHeight(x, y);
+            posAttribute.setZ(i, height); // Z becomes world Y after rotation
+        }
+        grassGeometry.computeVertexNormals();
+        
+        const grass = new THREE.Mesh(grassGeometry, grassMaterial);
+        grass.rotation.x = -Math.PI / 2;
+        grass.receiveShadow = true;
+        scene.add(grass);
+
+        // 2. The Hole
+        const holeRadius = 0.3;
+        const holeGeometry = new THREE.CircleGeometry(holeRadius, 32);
+        const holeMaterial = new THREE.MeshBasicMaterial({ color: 0x111111, depthWrite: false });
+        const hole = new THREE.Mesh(holeGeometry, holeMaterial);
+        hole.rotation.x = -Math.PI / 2;
+        hole.position.set(0, 0.01, -25); // 25 units ahead
+        scene.add(hole);
+
+        // 3. The Flag
+        const poleGeometry = new THREE.CylinderGeometry(0.02, 0.02, 3);
+        const poleMaterial = new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.8, roughness: 0.2 });
+        const pole = new THREE.Mesh(poleGeometry, poleMaterial);
+        pole.position.set(0, 1.5, -25.2);
+        pole.castShadow = true;
+        scene.add(pole);
+
+        const flagGeometry = new THREE.PlaneGeometry(0.8, 0.5);
+        const flagMaterial = new THREE.MeshStandardMaterial({ color: 0xef4444, side: THREE.DoubleSide });
+        const flag = new THREE.Mesh(flagGeometry, flagMaterial);
+        flag.position.set(0.4, 2.7, -25.2);
+        flag.castShadow = true;
+        scene.add(flag);
+
+        // Decorative Trees (Stylized BotW aesthetic)
+        function createTree(x, z) {
+            const terrainY = getTerrainHeight(x, z);
+
+            const trunkGeo = new THREE.CylinderGeometry(0.15, 0.25, 1.2, 5);
+            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6e5233, flatShading: true });
+            const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+            trunk.position.set(x, terrainY + 0.6, z);
+            trunk.castShadow = true;
+
+            // Fluffy, chunky leaves using overlapping dodecahedrons
+            const leavesMat = new THREE.MeshStandardMaterial({ color: 0x4a9632, flatShading: true });
+            
+            const leaves1 = new THREE.Mesh(new THREE.DodecahedronGeometry(1.2, 0), leavesMat);
+            leaves1.position.set(x, terrainY + 1.8, z);
+            leaves1.castShadow = true;
+
+            const leaves2 = new THREE.Mesh(new THREE.DodecahedronGeometry(0.8, 0), leavesMat);
+            leaves2.position.set(x + 0.6, terrainY + 1.4, z + 0.4);
+            leaves2.castShadow = true;
+
+            const leaves3 = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7, 0), leavesMat);
+            leaves3.position.set(x - 0.5, terrainY + 1.5, z - 0.3);
+            leaves3.castShadow = true;
+
+            scene.add(trunk);
+            scene.add(leaves1);
+            scene.add(leaves2);
+            scene.add(leaves3);
+        }
+
+        // Add trees along the sides
+        for(let i=0; i<25; i++) {
+            createTree(
+                (Math.random() > 0.5 ? 1 : -1) * (4 + Math.random() * 12), 
+                -Math.random() * 45 + 5
+            );
+        }
+
+        // 4. The Golf Ball
+        const ballRadius = 0.08;
+        const ballGeometry = new THREE.SphereGeometry(ballRadius, 32, 32);
+        const ballMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0xffffff, 
+            roughness: 0.3, 
+            metalness: 0.1 
+        });
+        const ball = new THREE.Mesh(ballGeometry, ballMaterial);
+        ball.position.set(0, ballRadius, 0);
+        ball.castShadow = true;
+        scene.add(ball);
+
+        // --- Game Logic & Physics ---
+        let isPlaying = false;
+        let isWon = false;
+        let velocity = new THREE.Vector3(0, 0, 0);
+        let targetVelocityX = 0;
+        let targetVelocityZ = -0.05; // Constant forward baseline once started
+        
+        // Sensor calibration bases
+        let baseGamma = null;
+        let baseBeta = null;
+        let useMouseFallback = true;
+        let mouseX = 0;
+        let mouseY = 0;
+
+        // --- Input Handling ---
+
+        function handleOrientation(event) {
+            // Check for valid data and ensure it's not dead zeroes
+            if (event.gamma !== null && event.beta !== null) {
+                if (event.gamma === 0 && event.beta === 0) return; // Ignore uninitialized zeros
+
+                useMouseFallback = false;
+                
+                // Set baseline on first read
+                if (baseGamma === null) {
+                    baseGamma = event.gamma;
+                    baseBeta = event.beta;
+                }
+
+                // Calculate tilt relative to the angle they held the phone when they hit "Start"
+                let deltaGamma = event.gamma - baseGamma;
+                let deltaBeta = event.beta - baseBeta;
+
+                // Handle gimbal wrap-around
+                if (deltaGamma > 90) deltaGamma -= 180;
+                if (deltaGamma < -90) deltaGamma += 180;
+
+                // Clamp to a 30-degree steering window for better sensitivity
+                const maxTilt = 30;
+                let steerX = Math.max(-maxTilt, Math.min(maxTilt, deltaGamma)) / maxTilt;
+                let steerZ = Math.max(-maxTilt, Math.min(maxTilt, deltaBeta)) / maxTilt;
+
+                // Map tilt to velocity
+                targetVelocityX = steerX * 0.15; 
+                targetVelocityZ = -0.05 + (steerZ * 0.1); 
+                
+                // Prevent going backwards entirely
+                if (targetVelocityZ > -0.01) targetVelocityZ = -0.01; 
+            }
+        }
+
+        function handleMouseMove(event) {
+            if (!useMouseFallback) return;
+            // Normalize mouse position to -1 to +1
+            const nx = (event.clientX / window.innerWidth) * 2 - 1;
+            const ny = (event.clientY / window.innerHeight) * 2 - 1;
+            
+            targetVelocityX = nx * 0.15;
+            targetVelocityZ = -0.05 + (ny * 0.1); // Push mouse up to go faster
+            if (targetVelocityZ > -0.01) targetVelocityZ = -0.01;
+        }
+
+        // --- Touch Fallback (Crucial for embedded environments) ---
+        let touchStartX = 0;
+        let touchStartY = 0;
+
+        document.addEventListener('touchstart', (e) => {
+            if (!isPlaying || isWon) return;
+            useMouseFallback = false;
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        }, { passive: false });
+
+        document.addEventListener('touchmove', (e) => {
+            if (!isPlaying || isWon) return;
+            e.preventDefault(); // Prevent screen scroll
+
+            const deltaX = e.touches[0].clientX - touchStartX;
+            const deltaY = e.touches[0].clientY - touchStartY;
+
+            const maxDrag = 100; // Pixels to reach max steer
+            let steerX = Math.max(-1, Math.min(1, deltaX / maxDrag));
+            let steerZ = Math.max(-1, Math.min(1, deltaY / maxDrag));
+
+            targetVelocityX = steerX * 0.15;
+            targetVelocityZ = -0.05 + (steerZ * 0.1);
+
+            if (targetVelocityZ > -0.01) targetVelocityZ = -0.01;
+        }, { passive: false });
+
+        document.addEventListener('touchend', () => {
+            if (!isPlaying || isWon) return;
+            // Snap back to forward trajectory when finger is lifted
+            targetVelocityX = 0;
+            targetVelocityZ = -0.05;
+        });
+
+        // --- UI Interactions ---
+
+        document.getElementById('start-btn').addEventListener('click', () => {
+            const startSequence = () => {
+                document.getElementById('ui-layer').style.backgroundColor = 'transparent';
+                document.getElementById('ui-layer').style.backdropFilter = 'none';
+                document.getElementById('intro-screen').style.opacity = '0';
+                setTimeout(() => {
+                    document.getElementById('intro-screen').style.display = 'none';
+                    document.getElementById('aim-hint').style.opacity = '1';
+                    
+                    // Fade out hint after 3 seconds
+                    setTimeout(() => {
+                        document.getElementById('aim-hint').style.opacity = '0';
+                    }, 3000);
+
+                    isPlaying = true;
+                }, 500);
+
+                // Start moving slightly
+                velocity.z = -0.05;
+
+                // Setup Listeners
+                document.addEventListener('mousemove', handleMouseMove);
+            };
+
+            // Request DeviceOrientation permission for iOS 13+
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            window.addEventListener('deviceorientation', handleOrientation);
+                        } else {
+                            console.warn("Sensor permission denied. Using touch fallback.");
+                        }
+                        startSequence();
+                    })
+                    .catch(err => {
+                        console.error("Sensor error:", err);
+                        startSequence();
+                    });
+            } else {
+                // Non-iOS 13+ devices
+                window.addEventListener('deviceorientation', handleOrientation);
+                startSequence();
+            }
+        });
+
+        // --- Win Sequence ---
+        function triggerWin() {
+            if (isWon) return;
+            isWon = true;
+            
+            // Plop sound simulation (just visual)
+            velocity.set(0, 0, 0);
+            
+            const uiLayer = document.getElementById('ui-layer');
+            const successScreen = document.getElementById('success-screen');
+            
+            uiLayer.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+            uiLayer.style.backdropFilter = 'blur(10px)';
+            successScreen.classList.remove('hidden');
+            
+            // Trigger animation classes
+            setTimeout(() => {
+                successScreen.classList.remove('opacity-0', 'scale-90');
+                successScreen.classList.add('opacity-100', 'scale-100');
+            }, 50);
+
+            // Redirect to main site after sequence
+            setTimeout(() => {
+                window.location.href = "https://www.fairwaybook.com";
+            }, 2500);
+        }
+
+        // --- Main Game Loop ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (isPlaying && !isWon) {
+                // Smoothly interpolate current velocity toward target velocity (inertia/friction feel)
+                velocity.x += (targetVelocityX - velocity.x) * 0.1;
+                velocity.z += (targetVelocityZ - velocity.z) * 0.1;
+
+                // Apply velocity to position
+                ball.position.x += velocity.x;
+                ball.position.z += velocity.z;
+
+                // Simple boundaries to keep them on the grass
+                if (ball.position.x > 8) ball.position.x = 8;
+                if (ball.position.x < -8) ball.position.x = -8;
+
+                // Adjust ball height to match terrain elevation perfectly to prevent clipping
+                ball.position.y = getTerrainHeight(ball.position.x, ball.position.z) + ballRadius;
+
+                // Add slight rolling visual (rotating the ball based on distance moved)
+                const distanceMoved = Math.sqrt(velocity.x**2 + velocity.z**2);
+                ball.rotation.x -= velocity.z / ballRadius;
+                ball.rotation.z += velocity.x / ballRadius;
+
+                // Check collision with hole
+                const distToHole = Math.sqrt(
+                    Math.pow(ball.position.x - hole.position.x, 2) + 
+                    Math.pow(ball.position.z - hole.position.z, 2)
+                );
+
+                if (distToHole < holeRadius) {
+                    triggerWin();
+                }
+
+                // If user misses and goes way past the hole, reset them gently
+                if (ball.position.z < -35) {
+                    ball.position.set(0, ballRadius, 0);
+                    velocity.set(0,0,0);
+                    targetVelocityX = 0;
+                    targetVelocityZ = -0.05;
+                }
+            }
+
+            // Win Animation: Ball drops into hole
+            if (isWon) {
+                if (ball.position.y > -0.2) {
+                    ball.position.y -= 0.02; // Drop down
+                    ball.position.x += (hole.position.x - ball.position.x) * 0.1; // Center it
+                    ball.position.z += (hole.position.z - ball.position.z) * 0.1;
+                }
+            }
+
+            // Camera Tracking: "Eye behind the ball"
+            // Camera stays slightly behind and slightly above the ball, looking forward.
+            const cameraFollowSpeed = 0.15;
+            const targetCameraX = ball.position.x;
+            const targetCameraY = ball.position.y + 0.3; // Low to the ground
+            const targetCameraZ = ball.position.z + 1.2; // Behind the ball
+
+            camera.position.x += (targetCameraX - camera.position.x) * cameraFollowSpeed;
+            camera.position.y += (targetCameraY - camera.position.y) * cameraFollowSpeed;
+            camera.position.z += (targetCameraZ - camera.position.z) * cameraFollowSpeed;
+
+            // Look slightly ahead of the ball, towards the hole
+            camera.lookAt(ball.position.x, 0, ball.position.z - 5);
+
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resizing
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start loop
+        animate();
+    </script>
+</body>
+</html>

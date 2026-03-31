@@ -110,7 +110,7 @@
         
         // Beautiful sunset/sunrise sky color (BotW style)
         scene.background = new THREE.Color('#9cd3f0');
-        scene.fog = new THREE.FogExp2('#9cd3f0', 0.015);
+        scene.fog = new THREE.FogExp2('#9cd3f0', 0.012); // Slightly pushed back fog for grander skyline
 
         // Camera setup (simulating the eye right behind the ball)
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -132,11 +132,11 @@
         dirLight.shadow.mapSize.width = 2048;
         dirLight.shadow.mapSize.height = 2048;
         dirLight.shadow.camera.near = 0.5;
-        dirLight.shadow.camera.far = 50;
-        dirLight.shadow.camera.left = -20;
-        dirLight.shadow.camera.right = 20;
-        dirLight.shadow.camera.top = 20;
-        dirLight.shadow.camera.bottom = -20;
+        dirLight.shadow.camera.far = 150;
+        dirLight.shadow.camera.left = -50;
+        dirLight.shadow.camera.right = 50;
+        dirLight.shadow.camera.top = 50;
+        dirLight.shadow.camera.bottom = -50;
         scene.add(dirLight);
 
         // --- Environment Creation ---
@@ -144,14 +144,17 @@
         // Helper function for deterministic terrain height (prevents clipping & allows hills)
         function getTerrainHeight(x, z) {
             if (Math.abs(x) <= 3) return 0; // Flat fairway down the middle
-            const edgeDist = Math.abs(x) - 3;
+            let edgeDist = Math.abs(x) - 3;
+            // Taper off the extreme heights in the distance so it doesn't spike to infinity
+            if (edgeDist > 20) edgeDist = 20 + (edgeDist - 20) * 0.15; 
+            
             // Rolling hills using sine/cosine for an organic, stylized look
             const noise = Math.sin(x * 1.2) * 0.2 + Math.cos(z * 0.6) * 0.2;
             return edgeDist * 0.4 + (noise * edgeDist);
         }
         
-        // 1. The Fairway (Main Grass)
-        const grassGeometry = new THREE.PlaneGeometry(100, 100, 64, 64);
+        // 1. The Fairway (Main Grass - Expanded for infinite skyline)
+        const grassGeometry = new THREE.PlaneGeometry(300, 300, 128, 128); // Massive plane
         const grassMaterial = new THREE.MeshStandardMaterial({ 
             color: 0x6dbf43, // Vibrant, stylized BotW green
             roughness: 1.0,
@@ -173,6 +176,23 @@
         grass.rotation.x = -Math.PI / 2;
         grass.receiveShadow = true;
         scene.add(grass);
+
+        // Distant Mountains for BotW Skyline
+        function createMountain(x, z, scale) {
+            const mountGeo = new THREE.ConeGeometry(15 * scale, 25 * scale, 7);
+            const mountMat = new THREE.MeshStandardMaterial({ color: 0x5a9e38, flatShading: true, roughness: 1.0 });
+            const mountain = new THREE.Mesh(mountGeo, mountMat);
+            mountain.position.set(x, (12.5 * scale) - 5, z); // Bury base slightly
+            mountain.rotation.y = Math.random() * Math.PI;
+            scene.add(mountain);
+        }
+        // Place mountains way in the back
+        createMountain(-60, -110, 2.5);
+        createMountain(70, -130, 3.2);
+        createMountain(-25, -150, 4.0);
+        createMountain(40, -160, 2.8);
+        createMountain(-90, -90, 2.0);
+        createMountain(90, -100, 2.2);
 
         // 2. The Hole
         const holeRadius = 0.3;
@@ -229,11 +249,11 @@
             scene.add(leaves3);
         }
 
-        // Add trees along the sides
-        for(let i=0; i<35; i++) {
+        // Add trees along the sides, extended deep into the horizon
+        for(let i=0; i<100; i++) {
             createTree(
-                (Math.random() > 0.5 ? 1 : -1) * (4 + Math.random() * 12), 
-                -Math.random() * 60 + 5
+                (Math.random() > 0.5 ? 1 : -1) * (4 + Math.random() * 45), 
+                -Math.random() * 140 + 5
             );
         }
 
@@ -262,7 +282,7 @@
         bCtx.font = 'bold 44px "Georgia", serif';
         bCtx.textAlign = 'left';
         bCtx.textBaseline = 'middle';
-        bCtx.fillText("HOWLAND PUMP & SUPPLY", 250, bannerCanvas.height/2);
+        bCtx.fillText("Sponsored by Howland Pump & Supply", 250, bannerCanvas.height/2);
         const bannerTex = new THREE.CanvasTexture(bannerCanvas);
         bannerTex.anisotropy = 16;
 
@@ -807,18 +827,18 @@
 
             const time = clock.getElapsedTime();
 
-            // --- High-Fidelity Blimp Animation ---
-            // Keep the blimp strictly in center focus relative to the camera
-            const blimpTargetX = Math.sin(time * 0.25) * 16; // Smooth wide sweeping figure-8
-            const blimpTargetZ = camera.position.z - 45 + Math.cos(time * 0.4) * 6; // Always 45 units ahead!
+            // --- High-Fidelity Blimp Animation (Slowed Down) ---
+            // Keep the blimp strictly in center focus relative to the camera, slowed movement for readability
+            const blimpTargetX = Math.sin(time * 0.12) * 16; // Slower wide sweeping figure-8
+            const blimpTargetZ = camera.position.z - 45 + Math.cos(time * 0.18) * 6; // Always 45 units ahead!
             
-            // Calculate velocity vector to dynamically rotate the blimp into the wind
-            const bVx = Math.cos(time * 0.25) * 0.25 * 16;
-            const bVz = -Math.sin(time * 0.4) * 0.4 * 6;
+            // Calculate velocity vector to dynamically rotate the blimp into the wind (also slowed)
+            const bVx = Math.cos(time * 0.12) * 0.12 * 16;
+            const bVz = -Math.sin(time * 0.18) * 0.18 * 6;
             
             mainBlimpContainer.position.x = blimpTargetX;
             mainBlimpContainer.position.z = blimpTargetZ;
-            mainBlimpContainer.position.y = 18 + Math.sin(time * 0.6) * 1.5; // Majestic vertical bobbing
+            mainBlimpContainer.position.y = 18 + Math.sin(time * 0.4) * 1.5; // Majestic vertical bobbing
             
             // Rotate blimp to face flight direction perfectly
             mainBlimpContainer.rotation.y = -Math.atan2(bVz, bVx);
@@ -826,13 +846,13 @@
             // Strobe the aviation beacon
             beaconMat.opacity = (time % 1.5 < 0.2) ? 1 : 0.1;
             
-            // Wave the high-fidelity banner
+            // Wave the high-fidelity banner (slowed wind effect to match slower blimp)
             const bPos = bannerGeo.attributes.position;
             for (let i = 0; i < bPos.count; i++) {
                 const vx = bPos.getX(i);
                 // The right side of the banner is attached to the blimp, left side waves freely
                 const normalizedX = (bannerWidth / 2 - vx) / bannerWidth; 
-                const wave = Math.sin(normalizedX * 14 - time * 8) * 0.35 * normalizedX;
+                const wave = Math.sin(normalizedX * 14 - time * 6) * 0.35 * normalizedX;
                 bPos.setZ(i, wave);
             }
             bPos.needsUpdate = true;

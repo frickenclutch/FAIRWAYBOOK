@@ -180,21 +180,21 @@
         const holeMaterial = new THREE.MeshBasicMaterial({ color: 0x111111, depthWrite: false });
         const hole = new THREE.Mesh(holeGeometry, holeMaterial);
         hole.rotation.x = -Math.PI / 2;
-        hole.position.set(0, 0.01, -25); // 25 units ahead
+        hole.position.set(0, 0.01, -45); // Extended to 45 units ahead
         scene.add(hole);
 
         // 3. The Flag
         const poleGeometry = new THREE.CylinderGeometry(0.02, 0.02, 3);
         const poleMaterial = new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.8, roughness: 0.2 });
         const pole = new THREE.Mesh(poleGeometry, poleMaterial);
-        pole.position.set(0, 1.5, -25.2);
+        pole.position.set(0, 1.5, -45.2);
         pole.castShadow = true;
         scene.add(pole);
 
         const flagGeometry = new THREE.PlaneGeometry(0.8, 0.5);
         const flagMaterial = new THREE.MeshStandardMaterial({ color: 0xef4444, side: THREE.DoubleSide });
         const flag = new THREE.Mesh(flagGeometry, flagMaterial);
-        flag.position.set(0.4, 2.7, -25.2);
+        flag.position.set(0.4, 2.7, -45.2);
         flag.castShadow = true;
         scene.add(flag);
 
@@ -230,12 +230,395 @@
         }
 
         // Add trees along the sides
-        for(let i=0; i<25; i++) {
+        for(let i=0; i<35; i++) {
             createTree(
                 (Math.random() > 0.5 ? 1 : -1) * (4 + Math.random() * 12), 
-                -Math.random() * 45 + 5
+                -Math.random() * 60 + 5
             );
         }
+
+        // --- High-Fidelity Goodyear-Style Blimp ---
+        const blimpGroup = new THREE.Group();
+        const mainBlimpContainer = new THREE.Group(); // Wrapper to scale and position
+        
+        // 1. Blimp Body Canvas (Wrap around texture)
+        const blimpBodyCanvas = document.createElement('canvas');
+        blimpBodyCanvas.width = 2048;
+        blimpBodyCanvas.height = 1024;
+        const bbCtx = blimpBodyCanvas.getContext('2d');
+        bbCtx.fillStyle = '#e5e7eb'; // Silver-white base
+        bbCtx.fillRect(0, 0, 2048, 1024);
+        const blimpBodyTex = new THREE.CanvasTexture(blimpBodyCanvas);
+        blimpBodyTex.anisotropy = 16;
+        
+        // 2. Banner Canvas
+        const bannerCanvas = document.createElement('canvas');
+        bannerCanvas.width = 1200;
+        bannerCanvas.height = 160;
+        const bCtx = bannerCanvas.getContext('2d');
+        bCtx.fillStyle = '#ffffff';
+        bCtx.fillRect(0, 0, bannerCanvas.width, bannerCanvas.height);
+        bCtx.fillStyle = '#8b0000'; // Dark red matching Hulbert Supply
+        bCtx.font = 'bold 44px "Georgia", serif';
+        bCtx.textAlign = 'left';
+        bCtx.textBaseline = 'middle';
+        bCtx.fillText("HOWLAND PUMP & SUPPLY", 250, bannerCanvas.height/2);
+        const bannerTex = new THREE.CanvasTexture(bannerCanvas);
+        bannerTex.anisotropy = 16;
+
+        // 3. Load uploaded logo and paint onto blimp & banner
+        const logoImg = new Image();
+        logoImg.src = 'image_4988ca.png';
+        logoImg.onload = () => {
+            const logoW = 450;
+            const logoH = 280;
+
+            // Create a mirrored version of the logo for the back side of the blimp
+            const mirroredCanvas = document.createElement('canvas');
+            mirroredCanvas.width = logoW;
+            mirroredCanvas.height = logoH;
+            const mCtx = mirroredCanvas.getContext('2d');
+            mCtx.translate(logoW, 0);
+            mCtx.scale(-1, 1);
+            mCtx.drawImage(logoImg, 0, 0, logoW, logoH);
+
+            // Right Side of blimp (+Z seam). Reads correctly from outside.
+            bbCtx.drawImage(logoImg, 0 - logoW/2, 512 - logoH/2, logoW, logoH);
+            bbCtx.drawImage(logoImg, 2048 - logoW/2, 512 - logoH/2, logoW, logoH);
+            
+            // Left Side of blimp (-Z face). Needs mirroring to read correctly from outside.
+            bbCtx.drawImage(mirroredCanvas, 1024 - logoW/2, 512 - logoH/2, logoW, logoH);
+            
+            blimpBodyTex.needsUpdate = true;
+            
+            // Paint on Banner
+            bCtx.drawImage(logoImg, 40, 15, 180, 130);
+            bannerTex.needsUpdate = true;
+        };
+
+        // 4. Blimp Mesh Assembly
+        const blimpGeo = new THREE.SphereGeometry(1.5, 64, 32); // High polygon count
+        const blimpMat = new THREE.MeshStandardMaterial({ 
+            map: blimpBodyTex, 
+            roughness: 0.35, 
+            metalness: 0.2 
+        });
+        const blimpBody = new THREE.Mesh(blimpGeo, blimpMat);
+        blimpBody.scale.set(2.5, 1, 1); // Elongate
+        blimpGroup.add(blimpBody);
+
+        // Cabin
+        const cabin = new THREE.Mesh(
+            new THREE.BoxGeometry(1.2, 0.4, 0.4), 
+            new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.8 })
+        );
+        cabin.position.set(0, -1.2, 0);
+        blimpGroup.add(cabin);
+        
+        // Engine Pods
+        const engineGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.5, 16);
+        const engineMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9 });
+        const engineL = new THREE.Mesh(engineGeo, engineMat);
+        engineL.rotation.z = Math.PI / 2; 
+        engineL.position.set(-0.3, -1.1, 0.35);
+        blimpGroup.add(engineL);
+        const engineR = engineL.clone();
+        engineR.position.set(-0.3, -1.1, -0.35);
+        blimpGroup.add(engineR);
+
+        // Aerodynamic Fins
+        const finMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8 }); // Corporate Blue
+        const topFin = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.2, 0.05), finMat);
+        topFin.position.set(-3.2, 0.8, 0);
+        const bottomFin = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.2, 0.05), finMat);
+        bottomFin.position.set(-3.2, -0.8, 0);
+        const sideFinL = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.05, 1.2), finMat);
+        sideFinL.position.set(-3.2, 0, 0.8);
+        const sideFinR = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.05, 1.2), finMat);
+        sideFinR.position.set(-3.2, 0, -0.8);
+        blimpGroup.add(topFin, bottomFin, sideFinL, sideFinR);
+
+        // Blinking Aviation Beacon
+        const beaconMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true });
+        const beaconLight = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), beaconMat);
+        beaconLight.position.set(0, -1.5, 0);
+        blimpGroup.add(beaconLight);
+
+        // Banner Mesh (Double-sided with flipped UVs for 360-degree legibility)
+        const bannerWidth = 12;
+        const bannerGeo = new THREE.PlaneGeometry(bannerWidth, 1.4, 32, 4);
+        
+        // Front face
+        const bannerMatFront = new THREE.MeshBasicMaterial({ map: bannerTex, side: THREE.FrontSide });
+        const bannerFront = new THREE.Mesh(bannerGeo, bannerMatFront);
+
+        // Back face (Flipped UVs)
+        const bannerGeoBack = bannerGeo.clone();
+        const uvs = bannerGeoBack.attributes.uv;
+        for (let i = 0; i < uvs.count; i++) {
+            uvs.setX(i, 1 - uvs.getX(i)); // Flip horizontally
+        }
+        // Share the position attribute so animating bannerGeo automatically animates bannerGeoBack!
+        bannerGeoBack.setAttribute('position', bannerGeo.getAttribute('position'));
+        
+        const bannerMatBack = new THREE.MeshBasicMaterial({ map: bannerTex, side: THREE.BackSide });
+        const bannerBack = new THREE.Mesh(bannerGeoBack, bannerMatBack);
+
+        const bannerGroup = new THREE.Group();
+        bannerGroup.add(bannerFront, bannerBack);
+        bannerGroup.position.set(-9.5, 0, 0); // Trail directly behind the blimp's nose
+        blimpGroup.add(bannerGroup);
+
+        // Tow lines
+        const lineMat = new THREE.LineBasicMaterial({ color: 0x222222 });
+        const lineGeo1 = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-3.8, 0, 0), new THREE.Vector3(-4.8, 0.7, 0)]);
+        const lineGeo2 = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-3.8, 0, 0), new THREE.Vector3(-4.8, -0.7, 0)]);
+        blimpGroup.add(new THREE.Line(lineGeo1, lineMat), new THREE.Line(lineGeo2, lineMat));
+
+        mainBlimpContainer.add(blimpGroup);
+        mainBlimpContainer.scale.set(1.4, 1.4, 1.4); // Scale up for maximum visibility
+        scene.add(mainBlimpContainer);
+
+        // --- Milestone Markers ---
+        const milestones = [];
+
+        // Helper: Generate Canvas Texture for Text
+        function createTextTexture(text, style) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            
+            if (style === 'holo') {
+                ctx.fillStyle = 'rgba(0, 15, 30, 0.85)'; // Darker, opaque background for legibility
+                ctx.fillRect(0,0, canvas.width, canvas.height);
+                
+                // Add a glowing border
+                ctx.strokeStyle = '#00e5ff';
+                ctx.lineWidth = 6;
+                ctx.strokeRect(3, 3, canvas.width-6, canvas.height-6);
+
+                ctx.fillStyle = '#ffffff'; // White text for maximum contrast
+                ctx.shadowColor = '#00e5ff'; // Cyan glow
+                ctx.shadowBlur = 15;
+            } else {
+                // Gold or Silver Gradient
+                const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+                if (style === 'gold') {
+                    grad.addColorStop(0, '#d4af37');
+                    grad.addColorStop(0.5, '#fff7d6');
+                    grad.addColorStop(1, '#aa7c11');
+                } else if (style === 'silver') {
+                    grad.addColorStop(0, '#8e9eab');
+                    grad.addColorStop(0.5, '#ffffff');
+                    grad.addColorStop(1, '#8e9eab');
+                }
+                ctx.fillStyle = grad;
+                ctx.fillRect(0,0, canvas.width, canvas.height);
+                
+                ctx.fillStyle = '#111111'; // Dark text
+                ctx.shadowColor = 'rgba(255,255,255,0.8)';
+                ctx.shadowBlur = 4;
+            }
+            
+            ctx.font = 'bold 28px "Georgia", serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            const lines = text.split('\n');
+            const lineHeight = 36;
+            const startY = (canvas.height - (lines.length * lineHeight)) / 2 + 18;
+            lines.forEach((line, i) => {
+                ctx.fillText(line, canvas.width/2, startY + (i * lineHeight));
+            });
+            
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        // 1. First Milestone: Flag
+        function createFlagMilestone(x, z, text, style) {
+            const group = new THREE.Group();
+            const terrainY = getTerrainHeight(x, z);
+            group.position.set(x, terrainY - 4, z); // Start buried
+
+            const poleColor = style === 'gold' ? 0xd4af37 : 0xaaaaaa;
+            const mPole = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.04, 0.04, 3), 
+                new THREE.MeshStandardMaterial({ color: poleColor, metalness: 0.9, roughness: 0.1 })
+            );
+            mPole.position.y = 1.5;
+            mPole.castShadow = true;
+            group.add(mPole);
+
+            // Flag needs segments to wave
+            const flagWidth = 1.8;
+            const mFlagGeo = new THREE.PlaneGeometry(flagWidth, 1.2, 16, 8);
+            const mFlagMat = new THREE.MeshStandardMaterial({ 
+                map: createTextTexture(text, style), 
+                side: THREE.DoubleSide,
+                roughness: 0.3,
+                metalness: 0.6 // Gives the fabric a beautiful metallic sheen
+            });
+            const mFlag = new THREE.Mesh(mFlagGeo, mFlagMat);
+            mFlag.position.set(flagWidth/2, 2.4, 0); // Attach to pole
+            mFlag.castShadow = true;
+            group.add(mFlag);
+
+            scene.add(group);
+
+            milestones.push({
+                z: z,
+                triggered: false,
+                targetY: terrainY,
+                group: group,
+                update: (time) => {
+                    // Wind wave effect
+                    const pos = mFlagGeo.attributes.position;
+                    for (let i = 0; i < pos.count; i++) {
+                        const vx = pos.getX(i);
+                        // Anchor left side to pole, wave the rest
+                        const normalizedX = (vx + flagWidth/2) / flagWidth; 
+                        const wave = Math.sin(normalizedX * 6 - time * 5) * 0.2 * normalizedX;
+                        pos.setZ(i, wave);
+                    }
+                    pos.needsUpdate = true;
+                }
+            });
+        }
+
+        // 2. Second Milestone: Hologram
+        function createHoloMilestone(x, z, text) {
+            const group = new THREE.Group();
+            const terrainY = getTerrainHeight(x, z);
+            group.position.set(x, terrainY - 4, z); // Start buried
+
+            // Projector Base
+            const base = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 0.3, 8), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+            base.position.y = 0.15;
+            group.add(base);
+
+            // Glowing Projector Light
+            const glowMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+            const beam = new THREE.Mesh(new THREE.ConeGeometry(1.5, 3, 16, 1, true), glowMat);
+            beam.position.y = 1.5;
+            beam.rotation.x = Math.PI; // Flip cone upside down
+            group.add(beam);
+
+            // Holo Animation Group (Club + Ball)
+            const holoAnimGroup = new THREE.Group();
+            
+            // Core solid material + Glowing wireframe for that distinct sci-fi hologram look
+            const coreMat = new THREE.MeshBasicMaterial({ color: 0x002244, transparent: true, opacity: 0.9 });
+            const wireMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true, transparent: true, opacity: 0.8 });
+            
+            function createHoloPart(geometry, pos, rotZ, parent) {
+                const mesh = new THREE.Mesh(geometry, coreMat);
+                const wire = new THREE.Mesh(geometry, wireMat);
+                mesh.add(wire); 
+                if (pos) mesh.position.copy(pos);
+                if (rotZ) mesh.rotation.z = rotZ;
+                if (parent) parent.add(mesh);
+                return { mesh, wire };
+            }
+
+            // Club Pivot (acts like the golfer's hands at the top of the shaft)
+            const clubPivot = new THREE.Group();
+            clubPivot.position.set(0, 1.4, 0);
+            
+            // Shaft and Head attached to the pivot
+            createHoloPart(new THREE.CylinderGeometry(0.015, 0.015, 1.0, 4), new THREE.Vector3(0, -0.5, 0), 0, clubPivot);
+            createHoloPart(new THREE.BoxGeometry(0.12, 0.08, 0.05), new THREE.Vector3(0.04, -1.0, 0), 0, clubPivot);
+            
+            holoAnimGroup.add(clubPivot);
+
+            // Holo Ball (needs its own cloned materials so it can fade out independently of the club)
+            const ballCoreMat = coreMat.clone();
+            const ballWireMat = wireMat.clone();
+            const holoBall = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), ballCoreMat);
+            const holoBallWire = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), ballWireMat);
+            holoBall.add(holoBallWire);
+            holoBall.position.set(0, 0.35, 0); // Ground level of holo projector
+            holoAnimGroup.add(holoBall);
+
+            holoAnimGroup.position.y = 0.5;
+            group.add(holoAnimGroup);
+
+            // Holo Text
+            const textPlane = new THREE.Mesh(
+                new THREE.PlaneGeometry(3.5, 1.75), // Slightly larger
+                new THREE.MeshBasicMaterial({ 
+                    map: createTextTexture(text, 'holo'), 
+                    transparent: true, 
+                    opacity: 0.95, 
+                    depthWrite: false 
+                }) // Removed AdditiveBlending so the dark background blocks the bright sky
+            );
+            textPlane.position.set(0, 3, 0);
+            group.add(textPlane);
+
+            scene.add(group);
+
+            milestones.push({
+                z: z,
+                triggered: false,
+                targetY: terrainY,
+                group: group,
+                update: (time) => {
+                    // Floating effect
+                    holoAnimGroup.position.y = 0.5 + Math.sin(time * 2) * 0.1;
+                    textPlane.position.y = 3 + Math.sin(time * 2 + 1) * 0.1;
+                    
+                    // --- Swing Animation Logic ---
+                    const phase = (time * 1.2) % 2.0; // 2 second animation loop
+                    let clubAngle = 0;
+                    let ballX = 0;
+                    let ballOpacity = 1;
+
+                    if (phase < 1.0) {
+                        // Slow Backswing
+                        clubAngle = phase * 1.5; 
+                    } else if (phase < 1.1) {
+                        // Fast Downswing
+                        clubAngle = 1.5 - (phase - 1.0) * 10 * 3.0; // Moves rapidly from 1.5 to -1.5
+                    } else {
+                        // Follow through & gentle reset
+                        clubAngle = -1.5 + (phase - 1.1) * (1.5 / 0.9); // Moves back to 0
+                    }
+
+                    // --- Ball Hit Logic ---
+                    if (phase > 1.05 && phase < 1.5) {
+                        // Ball flies right immediately after club hits bottom arc
+                        ballX = (phase - 1.05) * 8;
+                        ballOpacity = 1 - (phase - 1.05) * 2.2; // Fade out rapidly as it flies
+                    } else if (phase >= 1.5) {
+                        ballOpacity = 0; // Keep hidden until next swing begins
+                    }
+
+                    // Apply animations
+                    clubPivot.rotation.z = clubAngle;
+                    holoBall.position.x = ballX;
+                    
+                    // --- Aesthetic Flicker ---
+                    const flicker = 0.8 + Math.random() * 0.2; 
+                    coreMat.opacity = flicker * 0.9;
+                    wireMat.opacity = flicker * 0.8;
+                    
+                    // Apply flickers and ball fades to the independent ball materials
+                    ballCoreMat.opacity = flicker * ballOpacity * 0.9;
+                    ballWireMat.opacity = flicker * ballOpacity * 0.8;
+
+                    glowMat.opacity = flicker * 0.2;
+                    textPlane.material.opacity = flicker * 0.95;
+                    group.rotation.y = Math.sin(time * 0.5) * 0.2; // Slowly face user
+                }
+            });
+        }
+
+        // Initialize Milestones
+        createFlagMilestone(-3, -10, "C4: TECHNOLOGIES\nEST 2025", 'gold');
+        createHoloMilestone(3, -20, "PGA Professional Player\nKevin Maginn\nNeeded better TEE TIME solutions.\nMarch 2026");
+        createFlagMilestone(-3, -32, "Partridge Run Golf Course\nSigns up as the 1st Customer\nMarch 2026", 'silver');
+
 
         // 4. The Golf Ball
         const ballRadius = 0.08;
@@ -295,9 +678,6 @@
                 // Map tilt to velocity
                 targetVelocityX = steerX * 0.15; 
                 targetVelocityZ = -0.05 + (steerZ * 0.1); 
-                
-                // Prevent going backwards entirely
-                if (targetVelocityZ > -0.01) targetVelocityZ = -0.01; 
             }
         }
 
@@ -309,7 +689,6 @@
             
             targetVelocityX = nx * 0.15;
             targetVelocityZ = -0.05 + (ny * 0.1); // Push mouse up to go faster
-            if (targetVelocityZ > -0.01) targetVelocityZ = -0.01;
         }
 
         // --- Touch Fallback (Crucial for embedded environments) ---
@@ -336,8 +715,6 @@
 
             targetVelocityX = steerX * 0.15;
             targetVelocityZ = -0.05 + (steerZ * 0.1);
-
-            if (targetVelocityZ > -0.01) targetVelocityZ = -0.01;
         }, { passive: false });
 
         document.addEventListener('touchend', () => {
@@ -428,6 +805,38 @@
         function animate() {
             requestAnimationFrame(animate);
 
+            const time = clock.getElapsedTime();
+
+            // --- High-Fidelity Blimp Animation ---
+            // Keep the blimp strictly in center focus relative to the camera
+            const blimpTargetX = Math.sin(time * 0.25) * 16; // Smooth wide sweeping figure-8
+            const blimpTargetZ = camera.position.z - 45 + Math.cos(time * 0.4) * 6; // Always 45 units ahead!
+            
+            // Calculate velocity vector to dynamically rotate the blimp into the wind
+            const bVx = Math.cos(time * 0.25) * 0.25 * 16;
+            const bVz = -Math.sin(time * 0.4) * 0.4 * 6;
+            
+            mainBlimpContainer.position.x = blimpTargetX;
+            mainBlimpContainer.position.z = blimpTargetZ;
+            mainBlimpContainer.position.y = 18 + Math.sin(time * 0.6) * 1.5; // Majestic vertical bobbing
+            
+            // Rotate blimp to face flight direction perfectly
+            mainBlimpContainer.rotation.y = -Math.atan2(bVz, bVx);
+
+            // Strobe the aviation beacon
+            beaconMat.opacity = (time % 1.5 < 0.2) ? 1 : 0.1;
+            
+            // Wave the high-fidelity banner
+            const bPos = bannerGeo.attributes.position;
+            for (let i = 0; i < bPos.count; i++) {
+                const vx = bPos.getX(i);
+                // The right side of the banner is attached to the blimp, left side waves freely
+                const normalizedX = (bannerWidth / 2 - vx) / bannerWidth; 
+                const wave = Math.sin(normalizedX * 14 - time * 8) * 0.35 * normalizedX;
+                bPos.setZ(i, wave);
+            }
+            bPos.needsUpdate = true;
+
             if (isPlaying && !isWon) {
                 // Smoothly interpolate current velocity toward target velocity (inertia/friction feel)
                 velocity.x += (targetVelocityX - velocity.x) * 0.1;
@@ -440,9 +849,27 @@
                 // Simple boundaries to keep them on the grass
                 if (ball.position.x > 8) ball.position.x = 8;
                 if (ball.position.x < -8) ball.position.x = -8;
+                if (ball.position.z > 3) { // Prevent rolling infinitely backwards off the course
+                    ball.position.z = 3;
+                    velocity.z = 0;
+                }
 
                 // Adjust ball height to match terrain elevation perfectly to prevent clipping
                 ball.position.y = getTerrainHeight(ball.position.x, ball.position.z) + ballRadius;
+
+                // --- Update Milestones ---
+                milestones.forEach(m => {
+                    // Trigger pop-up when ball gets within 8 units
+                    if (!m.triggered && ball.position.z < m.z + 8) {
+                        m.triggered = true;
+                    }
+                    if (m.triggered) {
+                        // Smoothly rise from the ground
+                        m.group.position.y += (m.targetY - m.group.position.y) * 0.05;
+                    }
+                    // Run custom animations (wind, floating)
+                    m.update(time);
+                });
 
                 // Add slight rolling visual (rotating the ball based on distance moved)
                 const distanceMoved = Math.sqrt(velocity.x**2 + velocity.z**2);
@@ -460,11 +887,17 @@
                 }
 
                 // If user misses and goes way past the hole, reset them gently
-                if (ball.position.z < -35) {
+                if (ball.position.z < -55) {
                     ball.position.set(0, ballRadius, 0);
                     velocity.set(0,0,0);
                     targetVelocityX = 0;
                     targetVelocityZ = -0.05;
+                    
+                    // Reset milestones on game reset
+                    milestones.forEach(m => { 
+                        m.triggered = false; 
+                        m.group.position.y = m.targetY - 4; // Bury them again
+                    });
                 }
             }
 
